@@ -429,7 +429,8 @@ contract IceProject_Vesting is Ownable {
     
     string private constant INSUFFICIENT_BALANCE = "Insufficient balance";
     string private constant VESTING_ALREADY_RELEASED = "Vesting already released";
-    string private constant NOT_VESTED = "Staking is ongoing";
+    string private constant NOT_VESTED = "Tokens are locked yet";
+    uint256 immutable public creationTime;
     
     // Total amount of tokens which were released from this contract
     uint256 public totalTokensReleased = 0;
@@ -453,8 +454,7 @@ contract IceProject_Vesting is Ownable {
     
     // Info of each vesting.
     struct Vesting {
-        uint256 releaseTime; // unlock time when the funds are available for withdrawal
-        uint256 amount; // amount that is available at specific point of time
+        uint256 amount; // amount that is released at specific point of time
         bool released; // flag that verifies if the funds are already withdrawn
     }
     
@@ -465,14 +465,7 @@ contract IceProject_Vesting is Ownable {
         require(address(_token) != address(0x0), "Ice token address is not valid");
         iceToken = _token;
 
-        for (uint256 i = 13; i <= 18; i++) {
-            addVesting(i, FROM_13_TILL_18_WEEKS);
-        }
-        for (uint256 i = 19; i <= 155; i++) {
-            addVesting(i, FROM_19_TILL_155_WEEKS);
-        }
-        addVesting(156, FOR_156_WEEK);
-        //transferOwnership(0x314e9c5BbDCb8eA9d779b39718665a31e49F7A21);
+        creationTime = block.timestamp + 1;
     }
     
     // Function returns reward token address
@@ -482,30 +475,26 @@ contract IceProject_Vesting is Ownable {
     
     // Function returns timestamp in which funds can be withdrawn
     function releaseTime(uint256 weekNumber) external view returns (uint256) {
-        return vestingInfo[weekNumber].releaseTime;
+        return weekNumber * week + creationTime;
     }
     
     // Function returns amount that can be withdrawn at a specific time
-    function vestingAmount(uint256 weekNumber) external view returns (uint256) {
-        return vestingInfo[weekNumber].amount;
-    }
-    
-    // Adds vesting information to vesting array. Can be called only by contract owner
-    function addVesting(uint weekNumber, uint256 _amount) public onlyOwner {
-        uint _releaseTime = weekNumber * week + block.timestamp + 1;
-        require(_amount != 0, "Amount must be greater then 0");
-        vestingInfo[weekNumber] = Vesting({
-            releaseTime: _releaseTime,
-            amount: _amount,
-            released: false
-        });
+    function vestingAmount(uint256 weekNumber) external view returns (uint256 amount) {
+        if (weekNumber >= 13 && weekNumber <= 18) {
+            amount = FROM_13_TILL_18_WEEKS;
+        }
+        if (weekNumber >= 19 && weekNumber <= 155) {
+            amount = FROM_19_TILL_155_WEEKS;
+        }
+        if (weekNumber == 156) {
+            amount = FOR_156_WEEK;
+        }
     }
     
     // Adds vesting information to vesting array. Can be called only by contract owner
     function removeVesting(uint256 weekNumber) external onlyOwner {
         Vesting storage vesting = vestingInfo[weekNumber];
         require(!vesting.released , VESTING_ALREADY_RELEASED);
-        vesting.releaseTime = 0;
         vesting.amount = 0;
         vesting.released = true; // save some gas in the future
         emit TokenVestingRemoved(weekNumber, vesting.amount);
@@ -517,13 +506,28 @@ contract IceProject_Vesting is Ownable {
         Vesting storage vesting = vestingInfo[weekNumber];
         require(!vesting.released , VESTING_ALREADY_RELEASED);
         // solhint-disable-next-line not-rely-on-time
-        require(block.timestamp >= vesting.releaseTime, NOT_VESTED);
-
-        require(iceToken.balanceOf(address(this)) >= vesting.amount, INSUFFICIENT_BALANCE);
-        vesting.released = true;
-        iceToken.safeTransfer(owner(), vesting.amount);
-        totalTokensReleased += vesting.amount;
-        emit TokenVestingReleased(weekNumber, vesting.amount);
+        uint256 _releaseTime = weekNumber * week + creationTime;
+        require(block.timestamp >= _releaseTime, NOT_VESTED);
+        
+        uint256 amount;
+        if (weekNumber >= 13 && weekNumber <= 18) {
+            amount = FROM_13_TILL_18_WEEKS;
+        }
+        if (weekNumber >= 19 && weekNumber <= 155) {
+            amount = FROM_19_TILL_155_WEEKS;
+        }
+        if (weekNumber == 156) {
+            amount = FOR_156_WEEK;
+        }
+        if (amount > 0) {
+            require(iceToken.balanceOf(address(this)) >= vesting.amount, INSUFFICIENT_BALANCE);
+            vesting.released = true;
+            vesting.amount = amount;
+            iceToken.safeTransfer(owner(), vesting.amount);
+            totalTokensReleased += vesting.amount;
+            emit TokenVestingReleased(weekNumber, vesting.amount);
+        }
+        
     }
     
     // In a case when there are some Ice tokens left on a contract this function allows the contract owner to retrieve excess tokens
