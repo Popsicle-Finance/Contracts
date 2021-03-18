@@ -817,29 +817,13 @@ contract IceToken is ERC20Permit, Ownable {
     
     constructor()  ERC20("IceToken", "ICE") ERC20Permit("IceToken") 
     {
-        //transferOwnership(0x314e9c5BbDCb8eA9d779b39718665a31e49F7A21);
+        
     }
     
-    // Project Vesting contract address
-    address public projectVestingContract;
-    
-    // Team Vesting wallet address
-    address public teamVestingAddr;
     
     // Maximum total supply of the token (69M)
     uint256 private _maxTotalSupply = 69000000000000000000000000;
-    
-    // Function that sets Project vesting contract address. Can be called only by the owner of the contract
-    function setProjectVestingContractAddress(address _projectVestingContract) external onlyOwner {
-        require(_projectVestingContract != address(0), "IceToken: Project Vesting contract zero address");
-        projectVestingContract = _projectVestingContract;
-    }
-    
-     // Function that sets Team vesting wallet address. Can be called only by the owner of the contract
-    function setTeamVestingAddress(address _teamVestingAddr) external onlyOwner {
-        require(_teamVestingAddr != address(0), "IceToken: Team Vesting zero address");
-        teamVestingAddr = _teamVestingAddr;
-    }
+
     
     // Returns maximum total supply of the token
     function getMaxTotalSupply() external view returns (uint256) {
@@ -858,26 +842,6 @@ contract IceToken is ERC20Permit, Ownable {
      */
     function mint(address account, uint256 amount) external onlyOwner {
         _mint(account, amount);
-    }
-    
-    /** @dev Creates `amount` tokens and assigns them to `projectVestingContract`, `teamVestingAddr` and the `owner` (in proportion 60%, 10% and 30%), increasing
-     * the total supply.
-     *
-     * Emits a {Transfer} event with `from` set to the zero address.
-     *
-     * Requirements
-     *
-     * - can be called only by the owner of contract
-     */
-    function mintForVesting(uint256 amount) external onlyOwner {
-        require(projectVestingContract != address(0), "IceToken: Project Vesting contract zero address");
-        require(teamVestingAddr != address(0), "IceToken: Team Vesting contract zero address");
-        uint256 toTeamVesting= amount / 10;
-        uint256 toOwner = amount / 10 * 3;
-        uint256 toProjectVestingContract = amount / 10 * 6;
-        _mint(owner(), toOwner);
-        _mint(projectVestingContract, toProjectVestingContract);
-        _mint(teamVestingAddr, toTeamVesting);
     }
     
     /**
