@@ -565,7 +565,8 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
     }
 // View function which shows user ICE reward for displayment on frontend
     function earned(address account) public view returns (uint256) {
-        return _sushiEarned(account, sushiPerToken()) * rewardRate / DIVISIONER;
+        UserInfo memory user = userInfo[account];
+        return _sushiEarned(account, sushiPerToken()) * rewardRate / DIVISIONER + user.remainingIceTokenReward;
     }
 // View function which shows user Sushi reward for displayment on frontend
     function sushiEarned(address account) public view returns (uint256) {
@@ -594,10 +595,38 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
         super.withdraw(amount);
         emit Withdrawn(msg.sender, amount);
     }
-// "Go home" function which withdraws all Funds and distributes all rewards to the user
+
+    // "Go home" function which withdraws all Funds and distributes all rewards to the user
     function exit() external {
-        withdraw(balanceOf(msg.sender));
-        getReward();
+        require(msg.sender != address(0));
+        
+        UserInfo storage user = userInfo[msg.sender];
+        uint _then = sushi.balanceOf(address(this));
+        uint256 amount = balanceOf(msg.sender);
+        require(amount > 0, "Cannot withdraw 0");
+        
+        masterChef.withdraw(pid, amount); // harvests sushi
+        sushiPerTokenStored = _sushiPerToken(sushi.balanceOf(address(this)) - _then);
+        
+        user.sushiRewards = _sushiEarned(msg.sender, sushiPerTokenStored);
+        user.sushiPerTokenPaid = sushiPerTokenStored;
+        
+        super.withdraw(amount);
+        emit Withdrawn(msg.sender, amount);
+        
+        uint256 reward = user.sushiRewards;
+        if (reward > 0) {
+            user.sushiRewards = 0;
+            sushi.safeTransfer(msg.sender, reward);
+            emit SushiPaid(msg.sender, reward);
+        }
+        reward = reward * rewardRate / DIVISIONER + user.remainingIceTokenReward;
+        if (reward > 0)
+        {
+            user.remainingIceTokenReward = safeRewardTransfer(msg.sender, reward);
+            emit RewardPaid(msg.sender, reward);
+        }
+        
     }
     // Changes rewards rate of ICE token
     function setRewardRate(uint256 _rewardRate) external onlyOwner {
