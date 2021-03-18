@@ -504,8 +504,17 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
 
 // Set of variables that is storing user Sushi rewards
     uint256 public sushiPerTokenStored;
-    mapping(address => uint256) public sushiPerTokenPaid;
-    mapping(address => uint256) public sushiRewards;
+    // Info of each user.
+    struct UserInfo {
+        uint256 remainingIceTokenReward; // Remaining Token amount that is owned to the user.
+        uint256 sushiPerTokenPaid;
+        uint256 sushiRewards;
+    }
+    
+    // Info of each user that stakes ICE tokens.
+    mapping(address => UserInfo) public userInfo;
+    //mapping(address => uint256) public sushiPerTokenPaid;
+    //mapping(address => uint256) public sushiRewards;
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
@@ -531,14 +540,14 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
     }
 // Function which tracks rewards of a user and harvests all sushi rewards from Masterchef
     function _updateReward(address account) override internal {
-
+        UserInfo storage user = userInfo[msg.sender];
         uint _then = sushi.balanceOf(address(this));
         masterChef.withdraw(pid, 0); // harvests sushi
         sushiPerTokenStored = _sushiPerToken(sushi.balanceOf(address(this)) - _then);
 
         if (account != address(0)) {
-            sushiRewards[account] = _sushiEarned(account, sushiPerTokenStored);
-            sushiPerTokenPaid[account] = sushiPerTokenStored;
+            user.sushiRewards = _sushiEarned(account, sushiPerTokenStored);
+            user.sushiPerTokenPaid = sushiPerTokenStored;
         }
     }
 
@@ -564,8 +573,9 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
     }
 // Calculates how much sushi is entitled for a particular user
     function _sushiEarned(address account, uint256 sushiPerToken_) internal view returns (uint256) {
+        UserInfo memory user = userInfo[account];
         return
-            balanceOf(account) * (sushiPerToken_ - sushiPerTokenPaid[account]) / 1e18 + sushiRewards[account];
+            balanceOf(account) * (sushiPerToken_ - user.sushiPerTokenPaid) / 1e18 + user.sushiRewards;
     }
 
     // stake visibility is public as overriding LPTokenWrapper's stake() function
@@ -595,15 +605,33 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
     }
 // Harvests rewards to the user but leaves the Lp tokens deposited
     function getReward() public updateReward(msg.sender) {
-        uint256 reward = sushiRewards[msg.sender];
+        UserInfo storage user = userInfo[msg.sender];
+        uint256 reward = user.sushiRewards;
         if (reward > 0) {
-            sushiRewards[msg.sender] = 0;
+            user.sushiRewards = 0;
             sushi.safeTransfer(msg.sender, reward);
             emit SushiPaid(msg.sender, reward);
-            reward = reward * rewardRate / DIVISIONER;
-            ice.safeTransfer(msg.sender, reward);
+        }
+        reward = reward * rewardRate / DIVISIONER + user.remainingIceTokenReward;
+        if (reward > 0)
+        {
+            user.remainingIceTokenReward = safeRewardTransfer(msg.sender, reward);
             emit RewardPaid(msg.sender, reward);
         }
+    }
+    
+    // Safe token distribution
+    function safeRewardTransfer(address _to, uint256 _amount) internal returns(uint256) {
+        uint256 rewardTokenBalance = ice.balanceOf(address(this));
+        if (rewardTokenBalance == 0) { //save some gas fee
+            return _amount;
+        }
+        if (_amount > rewardTokenBalance) { //save some gas fee
+            ice.transfer(_to, rewardTokenBalance);
+            return _amount - rewardTokenBalance;
+        }
+        ice.transfer(_to, _amount);
+        return 0;
     }
 }
 // Implemented to call functions of masterChef
