@@ -473,13 +473,14 @@ contract Sorbettiere is Ownable {
 
     constructor(
         IERC20 _ice,
-        uint256 _icePerSecond
+        uint256 _icePerSecond,
+        uint256 _startTime
     ) {
         ice = _ice;
         
         icePerSecond = _icePerSecond;
-        startTime = block.timestamp;
-        endTime = block.timestamp + 7 days;
+        startTime = _startTime;
+        endTime = _startTime + 7 days;
     }
     
     function changeEndTime(uint256 addSeconds) external onlyOwner {
