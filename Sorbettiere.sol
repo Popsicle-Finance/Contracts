@@ -429,9 +429,9 @@ contract Sorbettiere is Ownable {
     using SafeERC20 for IERC20;
     // Info of each user.
     struct UserInfo {
-        uint256 amount; // How many LP tokens the user has provided.
-        uint256 rewardDebt; // Reward debt. See explanation below.
-        uint256 remainingIceTokenReward;  // ICE Tokens that weren't distributed for user per pool.
+        uint128 amount; // How many LP tokens the user has provided.
+        uint128 rewardDebt; // Reward debt. See explanation below.
+        uint128 remainingIceTokenReward;  // ICE Tokens that weren't distributed for user per pool.
         //
         // We do some fancy math here. Basically, any point in time, the amount of ICE
         // entitled to a user but is pending to be distributed is:
@@ -447,13 +447,15 @@ contract Sorbettiere is Ownable {
     // Info of each pool.
     struct PoolInfo {
         IERC20 stakingToken; // Contract address of staked token
-        uint256 stakingTokenTotalAmount; //Total amount of deposited tokens
-        uint256 allocPoint; // How many allocation points assigned to this pool. ICE to distribute per second.
-        uint256 lastRewardTime; // Last timestamp number that ICE distribution occurs.
-        uint256 accIcePerShare; // Accumulated ICE per share, times 1e12. See below.
+        uint128 stakingTokenTotalAmount; //Total amount of deposited tokens
+        uint128 accIcePerShare; // Accumulated ICE per share, times 1e12. See below.
+        uint32 lastRewardTime; // Last timestamp number that ICE distribution occurs.
+        uint16 allocPoint; // How many allocation points assigned to this pool. ICE to distribute per second.
+        
+        
     }
     
-    IERC20 public ice; // The ICE TOKEN!!
+    IERC20 immutable public ice; // The ICE TOKEN!!
     
     uint256 public icePerSecond; // Ice tokens vested per second.
     
@@ -463,9 +465,9 @@ contract Sorbettiere is Ownable {
     
     uint256 public totalAllocPoint = 0; // Total allocation poitns. Must be the sum of all allocation points in all pools.
     
-    uint256 public startTime; // The timestamp when ICE farming starts.
+    uint32 immutable public startTime; // The timestamp when ICE farming starts.
     
-    uint256 public endTime; // Time on which the reward calculation should end
+    uint32 public endTime; // Time on which the reward calculation should end
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
@@ -474,7 +476,7 @@ contract Sorbettiere is Ownable {
     constructor(
         IERC20 _ice,
         uint256 _icePerSecond,
-        uint256 _startTime
+        uint32 _startTime
     ) {
         ice = _ice;
         
@@ -483,7 +485,7 @@ contract Sorbettiere is Ownable {
         endTime = _startTime + 7 days;
     }
     
-    function changeEndTime(uint256 addSeconds) external onlyOwner {
+    function changeEndTime(uint32 addSeconds) external onlyOwner {
         endTime += addSeconds;
     }
     
@@ -506,7 +508,7 @@ contract Sorbettiere is Ownable {
     // ----------- DO NOT add the same staking token more than once. Rewards will be messed up if you do. -------------
     // Good practice to update pools without messing up the contract
     function add(
-        uint256 _allocPoint,
+        uint16 _allocPoint,
         IERC20 _stakingToken,
         bool _withUpdate
     ) external onlyOwner {
@@ -521,7 +523,7 @@ contract Sorbettiere is Ownable {
                 stakingToken: _stakingToken,
                 stakingTokenTotalAmount: 0,
                 allocPoint: _allocPoint,
-                lastRewardTime: lastRewardTime,
+                lastRewardTime: uint32(lastRewardTime),
                 accIcePerShare: 0
             })
         );
@@ -531,7 +533,7 @@ contract Sorbettiere is Ownable {
     // Good practice to update pools without messing up the contract
     function set(
         uint256 _pid,
-        uint256 _allocPoint,
+        uint16 _allocPoint,
         bool _withUpdate
     ) external onlyOwner {
         if (_withUpdate) {
@@ -593,23 +595,23 @@ contract Sorbettiere is Ownable {
         }
 
         if (pool.stakingTokenTotalAmount == 0) {
-            pool.lastRewardTime = block.timestamp;
+            pool.lastRewardTime = uint32(block.timestamp);
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
         uint256 iceReward =
             multiplier * icePerSecond * pool.allocPoint / totalAllocPoint;
-        pool.accIcePerShare += iceReward * 1e12 / pool.stakingTokenTotalAmount;
-        pool.lastRewardTime = block.timestamp;
+        pool.accIcePerShare += uint128(iceReward * 1e12 / pool.stakingTokenTotalAmount);
+        pool.lastRewardTime = uint32(block.timestamp);
     }
 
     // Deposit staking tokens to Sorbettiere for ICE allocation.
-    function deposit(uint256 _pid, uint256 _amount) public {
+    function deposit(uint256 _pid, uint128 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint256 pending =
+            uint128 pending =
                 user.amount * pool.accIcePerShare / 1e12 - user.rewardDebt + user.remainingIceTokenReward;
             user.remainingIceTokenReward = safeRewardTransfer(msg.sender, pending);
         }
@@ -625,12 +627,12 @@ contract Sorbettiere is Ownable {
     }
 
     // Withdraw staked tokens from Sorbettiere.
-    function withdraw(uint256 _pid, uint256 _amount) public {
+    function withdraw(uint256 _pid, uint128 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "Sorbettiere: you cant eat that much popsicles");
         updatePool(_pid);
-        uint256 pending =
+        uint128 pending =
             user.amount * pool.accIcePerShare / 1e12 - user.rewardDebt + user.remainingIceTokenReward;
         user.remainingIceTokenReward = safeRewardTransfer(msg.sender, pending);
         user.amount -= _amount;
@@ -653,14 +655,14 @@ contract Sorbettiere is Ownable {
 
     // Safe ice transfer function. Just in case if the pool does not have enough ICE token,
     // The function returns the amount which is owed to the user
-    function safeRewardTransfer(address _to, uint256 _amount) internal returns(uint256) {
+    function safeRewardTransfer(address _to, uint128 _amount) internal returns(uint128) {
         uint256 iceTokenBalance = ice.balanceOf(address(this));
         if (iceTokenBalance == 0) { //save some gas fee
             return _amount;
         }
         if (_amount > iceTokenBalance) { //save some gas fee
             ice.safeTransfer(_to, iceTokenBalance);
-            return _amount - iceTokenBalance;
+            return _amount - uint128(iceTokenBalance);
         }
         ice.safeTransfer(_to, _amount);
         return 0;
