@@ -419,65 +419,91 @@ library SafeERC20 {
 }
 
 /**
- * @dev Contract module that helps prevent reentrant calls to a function.
+ * @dev Contract module which allows children to implement an emergency stop
+ * mechanism that can be triggered by an authorized account.
  *
- * Inheriting from `ReentrancyGuard` will make the {nonReentrant} modifier
- * available, which can be applied to functions to make sure there are no nested
- * (reentrant) calls to them.
- *
- * Note that because there is a single `nonReentrant` guard, functions marked as
- * `nonReentrant` may not call one another. This can be worked around by making
- * those functions `private`, and then adding `external` `nonReentrant` entry
- * points to them.
- *
- * TIP: If you would like to learn more about reentrancy and alternative ways
- * to protect against it, check out our blog post
- * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].
+ * This module is used through inheritance. It will make available the
+ * modifiers `whenNotPaused` and `whenPaused`, which can be applied to
+ * the functions of your contract. Note that they will not be pausable by
+ * simply including this module, only once the modifiers are put in place.
  */
-abstract contract ReentrancyGuard {
-    // Booleans are more expensive than uint256 or any type that takes up a full
-    // word because each write operation emits an extra SLOAD to first read the
-    // slot's contents, replace the bits taken up by the boolean, and then write
-    // back. This is the compiler's defense against contract upgrades and
-    // pointer aliasing, and it cannot be disabled.
+abstract contract Pausable is Context {
+    /**
+     * @dev Emitted when the pause is triggered by `account`.
+     */
+    event Paused(address account);
 
-    // The values being non-zero value makes deployment a bit more expensive,
-    // but in exchange the refund on every call to nonReentrant will be lower in
-    // amount. Since refunds are capped to a percentage of the total
-    // transaction's gas, it is best to keep them low in cases like this one, to
-    // increase the likelihood of the full refund coming into effect.
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
+    /**
+     * @dev Emitted when the pause is lifted by `account`.
+     */
+    event Unpaused(address account);
 
-    uint256 private _status;
+    bool private _paused;
 
+    /**
+     * @dev Initializes the contract in unpaused state.
+     */
     constructor () {
-        _status = _NOT_ENTERED;
+        _paused = false;
     }
 
     /**
-     * @dev Prevents a contract from calling itself, directly or indirectly.
-     * Calling a `nonReentrant` function from another `nonReentrant`
-     * function is not supported. It is possible to prevent this from happening
-     * by making the `nonReentrant` function external, and make it call a
-     * `private` function that does the actual work.
+     * @dev Returns true if the contract is paused, and false otherwise.
      */
-    modifier nonReentrant() {
-        // On the first call to nonReentrant, _notEntered will be true
-        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+    function paused() public view virtual returns (bool) {
+        return _paused;
+    }
 
-        // Any calls to nonReentrant after this point will fail
-        _status = _ENTERED;
-
+    /**
+     * @dev Modifier to make a function callable only when the contract is not paused.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    modifier whenNotPaused() {
+        require(!paused(), "Pausable: paused");
         _;
+    }
 
-        // By storing the original value once again, a refund is triggered (see
-        // https://eips.ethereum.org/EIPS/eip-2200)
-        _status = _NOT_ENTERED;
+    /**
+     * @dev Modifier to make a function callable only when the contract is paused.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    modifier whenPaused() {
+        require(paused(), "Pausable: not paused");
+        _;
+    }
+
+    /**
+     * @dev Triggers stopped state.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    function _pause() internal virtual whenNotPaused {
+        _paused = true;
+        emit Paused(_msgSender());
+    }
+
+    /**
+     * @dev Returns to normal state.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    function _unpause() internal virtual whenPaused {
+        _paused = false;
+        emit Unpaused(_msgSender());
     }
 }
 
-contract PopsicleStand is Ownable, ReentrancyGuard {
+contract PopsicleStand is Ownable, Pausable {
     using SafeERC20 for IERC20;
     // Info of each user.
     struct UserInfo {
@@ -609,7 +635,7 @@ contract PopsicleStand is Ownable, ReentrancyGuard {
     }
 
     // Deposit LP tokens to PopsicleStand. If previously LPs were deposited by the user, safeRewardTransfer gets triggered for pendingReward
-    function deposit(uint256 _amount) public nonReentrant {
+    function deposit(uint256 _amount) public whenNotPaused {
         UserInfo storage user = userInfo[msg.sender];
         updatePool();
         if (user.amount > 0) {
@@ -632,7 +658,7 @@ contract PopsicleStand is Ownable, ReentrancyGuard {
     }
 
     // Withdraw LP tokens from PopsicleStand. SafeRewardTransfer gets triggered for pendingReward
-    function withdraw(uint256 _amount) public nonReentrant {
+    function withdraw(uint256 _amount) public whenNotPaused {
         UserInfo storage user = userInfo[msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
         updatePool();
@@ -648,17 +674,18 @@ contract PopsicleStand is Ownable, ReentrancyGuard {
         lpToken.safeTransfer(address(msg.sender), _amount);
         emit Withdraw(msg.sender, _amount);
     }
-
+    
     // Withdraw without caring about rewards. EMERGENCY ONLY.
     function emergencyWithdraw() public {
         UserInfo storage user = userInfo[msg.sender];
-        lpToken.safeTransfer(address(msg.sender), user.amount);
-        emit EmergencyWithdraw(msg.sender, user.amount);
+        uint256 userAmount = user.amount;
         user.amount = 0;
         user.rewardDebtIce = 0;
         user.remainingIceTokenReward = 0;
         user.rewardDebtToken = 0;
         user.remainingTokenReward = 0;
+        lpToken.safeTransfer(address(msg.sender), userAmount);
+        emit EmergencyWithdraw(msg.sender, userAmount);
     }
 
     // Safe ice transfer function, just in case if pool not have enough ICE or Reward token.
@@ -673,5 +700,13 @@ contract PopsicleStand is Ownable, ReentrancyGuard {
         }
         rewardTokenToSend.transfer(_to, _amount);
         return 0;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }
