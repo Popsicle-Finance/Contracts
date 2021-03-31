@@ -1,3 +1,7 @@
+/**
+ *Submitted for verification at Etherscan.io on 2021-03-29
+*/
+
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.0;
@@ -429,9 +433,9 @@ contract Sorbettiere is Ownable {
     using SafeERC20 for IERC20;
     // Info of each user.
     struct UserInfo {
-        uint128 amount; // How many LP tokens the user has provided.
-        uint128 rewardDebt; // Reward debt. See explanation below.
-        uint128 remainingIceTokenReward;  // ICE Tokens that weren't distributed for user per pool.
+        uint256 amount; // How many LP tokens the user has provided.
+        uint256 rewardDebt; // Reward debt. See explanation below.
+        uint256 remainingIceTokenReward;  // ICE Tokens that weren't distributed for user per pool.
         //
         // We do some fancy math here. Basically, any point in time, the amount of ICE
         // entitled to a user but is pending to be distributed is:
@@ -447,8 +451,8 @@ contract Sorbettiere is Ownable {
     // Info of each pool.
     struct PoolInfo {
         IERC20 stakingToken; // Contract address of staked token
-        uint128 stakingTokenTotalAmount; //Total amount of deposited tokens
-        uint128 accIcePerShare; // Accumulated ICE per share, times 1e12. See below.
+        uint256 stakingTokenTotalAmount; //Total amount of deposited tokens
+        uint256 accIcePerShare; // Accumulated ICE per share, times 1e12. See below.
         uint32 lastRewardTime; // Last timestamp number that ICE distribution occurs.
         uint16 allocPoint; // How many allocation points assigned to this pool. ICE to distribute per second.
         
@@ -601,17 +605,17 @@ contract Sorbettiere is Ownable {
         uint256 multiplier = getMultiplier(pool.lastRewardTime, block.timestamp);
         uint256 iceReward =
             multiplier * icePerSecond * pool.allocPoint / totalAllocPoint;
-        pool.accIcePerShare += uint128(iceReward * 1e12 / pool.stakingTokenTotalAmount);
+        pool.accIcePerShare += iceReward * 1e12 / pool.stakingTokenTotalAmount;
         pool.lastRewardTime = uint32(block.timestamp);
     }
 
     // Deposit staking tokens to Sorbettiere for ICE allocation.
-    function deposit(uint256 _pid, uint128 _amount) public {
+    function deposit(uint256 _pid, uint256 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint128 pending =
+            uint256 pending =
                 user.amount * pool.accIcePerShare / 1e12 - user.rewardDebt + user.remainingIceTokenReward;
             user.remainingIceTokenReward = safeRewardTransfer(msg.sender, pending);
         }
@@ -627,12 +631,12 @@ contract Sorbettiere is Ownable {
     }
 
     // Withdraw staked tokens from Sorbettiere.
-    function withdraw(uint256 _pid, uint128 _amount) public {
+    function withdraw(uint256 _pid, uint256 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "Sorbettiere: you cant eat that much popsicles");
         updatePool(_pid);
-        uint128 pending =
+        uint256 pending =
             user.amount * pool.accIcePerShare / 1e12 - user.rewardDebt + user.remainingIceTokenReward;
         user.remainingIceTokenReward = safeRewardTransfer(msg.sender, pending);
         user.amount -= _amount;
@@ -641,28 +645,29 @@ contract Sorbettiere is Ownable {
         pool.stakingToken.safeTransfer(address(msg.sender), _amount);
         emit Withdraw(msg.sender, _pid, _amount);
     }
-
+    
     // Withdraw without caring about rewards. EMERGENCY ONLY.
     function emergencyWithdraw(uint256 _pid) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
+        uint256 userAmount = user.amount;
         user.amount = 0;
         user.rewardDebt = 0;
         user.remainingIceTokenReward = 0;
-        pool.stakingToken.safeTransfer(address(msg.sender), user.amount);
-        emit EmergencyWithdraw(msg.sender, _pid, user.amount);
+        pool.stakingToken.safeTransfer(address(msg.sender), userAmount);
+        emit EmergencyWithdraw(msg.sender, _pid, userAmount);
     }
 
     // Safe ice transfer function. Just in case if the pool does not have enough ICE token,
     // The function returns the amount which is owed to the user
-    function safeRewardTransfer(address _to, uint128 _amount) internal returns(uint128) {
+    function safeRewardTransfer(address _to, uint256 _amount) internal returns(uint256) {
         uint256 iceTokenBalance = ice.balanceOf(address(this));
         if (iceTokenBalance == 0) { //save some gas fee
             return _amount;
         }
         if (_amount > iceTokenBalance) { //save some gas fee
             ice.safeTransfer(_to, iceTokenBalance);
-            return _amount - uint128(iceTokenBalance);
+            return _amount - iceTokenBalance;
         }
         ice.safeTransfer(_to, _amount);
         return 0;
