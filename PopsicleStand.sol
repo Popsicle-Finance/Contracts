@@ -504,9 +504,9 @@ contract PopsicleStand is Ownable, Pausable {
     }
     
     
-    uint256 immutable public endBlock; // Block on which the reward calculation should end
+    uint32 immutable public endTime; // Time on which the reward calculation should end
     
-    uint256 public lastRewardBlock; // Last block number that ICE and Reward token distribution occurs.
+    uint256 public lastRewardTime; // Last timestamp number that ICE and Reward token distribution occurs.
     uint256 public accIcePerShare; // Accumulated Ice per share, times 1e12.
     uint256 public accRewardTokenPerShare; // Accumulated Reward token per share, times 1e12.
     
@@ -516,10 +516,12 @@ contract PopsicleStand is Ownable, Pausable {
     IERC20 immutable public rewardToken;
     IERC20 immutable public lpToken; // Address of LP token contract.
     
-    // Ice tokens distributed per block.
-    uint256 public icePerBlock;
-    // Reward tokens distributed per block.
-    uint256 public rewardTokenPerBlock;
+    // Ice tokens distributed per second.
+    uint256 public icePerSecond;
+    // Reward tokens distributed per second.
+    uint256 public rewardTokenPerSecond;
+
+    uint32 immutable public startTime; // The timestamp when ICE farming starts.
     // Info of each user that stakes LP tokens.
     mapping(address => UserInfo) public userInfo;
 
@@ -534,9 +536,9 @@ contract PopsicleStand is Ownable, Pausable {
         address _ice,
         address _rewardToken,
         address _lpToken,
-        uint256 _icePerBlock,
-        uint256 _rewardTokenPerBlock,
-        uint256 _endBlockAdd
+        uint256 _icePerSecond,
+        uint256 _rewardTokenPerSecond,
+        uint32 _startTime
     ) {
         require(_ice != address(0) && _rewardToken != address(0) && _lpToken != address(0), "PopsicleStand: Addresses should not be zero");
         ice = IERC20(_ice);
@@ -544,41 +546,46 @@ contract PopsicleStand is Ownable, Pausable {
         
         lpToken = IERC20(_lpToken);
         
-        icePerBlock = _icePerBlock;
-        rewardTokenPerBlock = _rewardTokenPerBlock;
-        
-        endBlock =  block.number + _endBlockAdd; //1192100 - near 6 month
+        icePerSecond = _icePerSecond;
+        rewardTokenPerSecond = _rewardTokenPerSecond;
+        startTime = _startTime;
+        endTime = _startTime + 7 days;
     }
 
-    // Return reward multiplier over the given _from to _to block.
+    // Return reward multiplier over the given _from to _to time.
     function getMultiplier(uint256 _from, uint256 _to)
         public
         view
         returns (uint256)
     {
-        if (_from > endBlock) {
+        _from = _from > startTime ? _from : startTime;
+        if (_from > endTime || _to < startTime) {
             return 0;
         }
-        if (_to > endBlock) {
-            return endBlock - _from;
+        if (_to > endTime) {
+            return endTime - _from;
         }
         return _to - _from;
     }
     
-    // Changes Ice token reward per block. Use this function to moderate the `lockup amount`. Essentially this function changes the amount of the reward
-    // which is entitled to the user for his LP staking by the time the `endBlock` is passed. However, the reward amount cannot be less than the amount of the previous token reward per block
-    // Good to use just before the `endBlock` approaches.
-    function setIcePerBlock(uint256 _icePerBlock) external onlyOwner {
-        require(_icePerBlock > icePerBlock, "PopsicleStand: new value should be greater then previous");
-        icePerBlock = _icePerBlock;
+    // Changes Ice token reward per second. Use this function to moderate the `lockup amount`. Essentially this function changes the amount of the reward
+    // which is entitled to the user for his LP staking by the time the `endTime` is passed.
+    // Good practice to update pools without messing up the contract
+    function setIcePerSecond(uint256 _icePerSecond,  bool _withUpdate) external onlyOwner {
+        if (_withUpdate) {
+            updatePool();
+        }
+        icePerSecond = _icePerSecond;
     }
     
-    // Changes Project token reward per block. Use this function to moderate the `lockup amount`. Essentially this function changes the amount of the reward
-    // which is entitled to the user for his LP staking by the time the `endBlock` is passed. However, the reward amount cannot be less than the amount of the previous token reward per block
-    // Good to use just before the `endBlock` approaches.
-    function setRewardTokenPerBlock(uint256 _rewardTokenPerBlock) external onlyOwner {
-        require(_rewardTokenPerBlock > rewardTokenPerBlock, "PopsicleStand: new value should be greater then previous");
-        rewardTokenPerBlock = _rewardTokenPerBlock;
+    // Changes Project token reward per second. Use this function to moderate the `lockup amount`. Essentially this function changes the amount of the reward
+    // which is entitled to the user for his LP staking by the time the `endTime` is passed.
+    // Good practice to update pools without messing up the contract
+    function setRewardTokenPerSecond(uint256 _rewardTokenPerSecond,  bool _withUpdate) external onlyOwner {
+        if (_withUpdate) {
+            updatePool();
+        }
+        rewardTokenPerSecond = _rewardTokenPerSecond;
     }
 
     // View function to see pending ICEs and RewardTokens on frontend.
@@ -591,12 +598,12 @@ contract PopsicleStand is Ownable, Pausable {
         uint256 accIcePerShareTemp = accIcePerShare;
         uint256 accRewardTokenPerShareTemp = accRewardTokenPerShare;
         uint256 lpSupply = lpToken.balanceOf(address(this));
-        if (block.number > lastRewardBlock && lpSupply != 0) {
+        if (block.timestamp > lastRewardTime && lpSupply != 0) {
             uint256 multiplier =
-                getMultiplier(lastRewardBlock, block.number);
-            uint256 iceReward = multiplier * icePerBlock;
+                getMultiplier(lastRewardTime, block.timestamp);
+            uint256 iceReward = multiplier * icePerSecond;
             accIcePerShareTemp += iceReward * 1e12 / lpSupply;
-            uint256 pTokenReward = multiplier * rewardTokenPerBlock;
+            uint256 pTokenReward = multiplier * rewardTokenPerSecond;
             accRewardTokenPerShareTemp += pTokenReward * 1e12 / lpSupply;
         }
         pendingIce = user.amount * accIcePerShareTemp / 1e12 - user.rewardDebtIce + user.remainingIceTokenReward;
@@ -605,22 +612,22 @@ contract PopsicleStand is Ownable, Pausable {
 
     // Update reward variables of the contract to be up-to-date.
     function updatePool() internal {
-        if (block.number <= lastRewardBlock) {
+        if (block.timestamp <= lastRewardTime) {
             return;
         }
         uint256 lpSupply = lpToken.balanceOf(address(this));
         if (lpSupply == 0) {
-            lastRewardBlock = block.number;
+            lastRewardTime = block.timestamp;
             return;
         }
-        uint256 multiplier = getMultiplier(lastRewardBlock, block.number);
+        uint256 multiplier = getMultiplier(lastRewardTime, block.timestamp);
         
-        uint256 iceReward = multiplier * icePerBlock;
+        uint256 iceReward = multiplier * icePerSecond;
         accIcePerShare += iceReward * 1e12 / lpSupply;
-        uint256 pTokenReward = multiplier * rewardTokenPerBlock;
+        uint256 pTokenReward = multiplier * rewardTokenPerSecond;
         accRewardTokenPerShare += pTokenReward * 1e12 / lpSupply;
         
-        lastRewardBlock = block.number;
+        lastRewardTime = block.timestamp;
     }
 
     // Deposit LP tokens to PopsicleStand. If previously LPs were deposited by the user, safeRewardTransfer gets triggered for pendingReward
