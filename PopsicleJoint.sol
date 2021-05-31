@@ -527,7 +527,7 @@ contract PopsicleJointStaking is LPTokenWrapper, Ownable {
     function _sushiPerToken(uint earned_) internal view returns (uint256) {
         uint _totalSupply = totalSupply();
         if (_totalSupply > 0) {
-            return (sushiPerTokenStored + earned_) * 1e18 / _totalSupply;
+            return sushiPerTokenStored + earned_ * 1e18 / _totalSupply;
         }
         return sushiPerTokenStored;
     }
